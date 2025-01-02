@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using System.IO.Ports;
 
 [RequireComponent(typeof(BoxCollider2D))]
 public class Snake : MonoBehaviour
@@ -14,15 +15,47 @@ public class Snake : MonoBehaviour
     private readonly List<Transform> segments = new List<Transform>();
     private Vector2Int input;
     private float nextUpdate;
+    private SerialPort serialPort;
 
     private void Start()
     {
+        try {
+            serialPort = new SerialPort("/dev/cu.usbserial-140", 9600) {
+                ReadTimeout = 50,
+                WriteTimeout = 50,
+                DtrEnable = true,
+                RtsEnable = true
+            };
+            serialPort.Open();
+        }
+        catch (System.Exception e) {
+            Debug.LogError($"Serial port error: {e.Message}");
+        }
         ResetState();
     }
 
     private void Update()
     {
-        // Only allow turning up or down while moving in the x-axis
+        if (serialPort != null && serialPort.IsOpen)
+        {
+            try {
+                string data = serialPort.ReadLine().Trim();
+                
+                if (direction.x != 0f)
+                {
+                    if (data == "UP") input = Vector2Int.up;
+                    else if (data == "DOWN") input = Vector2Int.down;
+                }
+                else if (direction.y != 0f)
+                {
+                    if (data == "RIGHT") input = Vector2Int.right;
+                    else if (data == "LEFT") input = Vector2Int.left;
+                }
+            }
+            catch { }
+        }
+
+        // 保留鍵盤控制作為備用
         if (direction.x != 0f)
         {
             if (Input.GetKeyDown(KeyCode.W) || Input.GetKeyDown(KeyCode.UpArrow)) {
@@ -31,7 +64,6 @@ public class Snake : MonoBehaviour
                 input = Vector2Int.down;
             }
         }
-        // Only allow turning left or right while moving in the y-axis
         else if (direction.y != 0f)
         {
             if (Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.RightArrow)) {
@@ -42,32 +74,42 @@ public class Snake : MonoBehaviour
         }
     }
 
+    private void ProcessArduinoInput(string data)
+    {
+        if (direction.x != 0f)
+        {
+            if (data == "UP") {
+                input = Vector2Int.up;
+            } else if (data == "DOWN") {
+                input = Vector2Int.down;
+            }
+        }
+        else if (direction.y != 0f)
+        {
+            if (data == "RIGHT") {
+                input = Vector2Int.right;
+            } else if (data == "LEFT") {
+                input = Vector2Int.left;
+            }
+        }
+    }
+
     private void FixedUpdate()
     {
-        // Wait until the next update before proceeding
-        if (Time.time < nextUpdate) {
-            return;
-        }
+        if (Time.time < nextUpdate) return;
 
-        // Set the new direction based on the input
         if (input != Vector2Int.zero) {
             direction = input;
         }
 
-        // Set each segment's position to be the same as the one it follows. We
-        // must do this in reverse order so the position is set to the previous
-        // position, otherwise they will all be stacked on top of each other.
         for (int i = segments.Count - 1; i > 0; i--) {
             segments[i].position = segments[i - 1].position;
         }
 
-        // Move the snake in the direction it is facing
-        // Round the values to ensure it aligns to the grid
         int x = Mathf.RoundToInt(transform.position.x) + direction.x;
         int y = Mathf.RoundToInt(transform.position.y) + direction.y;
         transform.position = new Vector2(x, y);
 
-        // Set the next update time based on the speed
         nextUpdate = Time.time + (1f / (speed * speedMultiplier));
     }
 
@@ -76,6 +118,11 @@ public class Snake : MonoBehaviour
         Transform segment = Instantiate(segmentPrefab);
         segment.position = segments[segments.Count - 1].position;
         segments.Add(segment);
+    
+        if(serialPort != null && serialPort.IsOpen)
+        {
+            serialPort.Write("S"); // 發送加分信號
+        }
     }
 
     public void ResetState()
@@ -142,6 +189,13 @@ public class Snake : MonoBehaviour
         }
 
         transform.position = position;
+    }
+    private void OnDestroy()
+    {
+        if (serialPort != null && serialPort.IsOpen)
+        {
+            serialPort.Close();
+        }
     }
 
 }
